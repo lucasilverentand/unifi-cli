@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/lucasilverentand/unifi-cli/compare/unifi-cli-v0.2.0...unifi-cli-v0.3.0) (2026-02-06)
+
+
+### Features
+
+* improve error messages for --data body resolution ([0648958](https://github.com/lucasilverentand/unifi-cli/commit/06489581384589220a93bdbb676d9b52c088147b))
+
 ## [0.2.0](https://github.com/lucasilverentand/unifi-cli/compare/unifi-cli-v0.1.0...unifi-cli-v0.2.0) (2026-02-06)
 
 
