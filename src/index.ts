@@ -393,14 +393,29 @@ function registerAction(parent: Command, cmd: CmdDef, spec: OpenAPISpec) {
 
 async function resolveBody(data: string): Promise<unknown> {
   if (data === "-") {
-    // Read from stdin
-    return Bun.stdin.json();
+    try {
+      return await Bun.stdin.json();
+    } catch {
+      throw new Error("Invalid JSON on stdin — pipe valid JSON or use @file.json");
+    }
   }
   if (data.startsWith("@")) {
-    // Read from file
-    return Bun.file(data.slice(1)).json();
+    const path = data.slice(1);
+    const file = Bun.file(path);
+    if (!(await file.exists())) {
+      throw new Error(`File not found: ${path}`);
+    }
+    try {
+      return await file.json();
+    } catch {
+      throw new Error(`Invalid JSON in file: ${path}`);
+    }
   }
-  return JSON.parse(data);
+  try {
+    return JSON.parse(data);
+  } catch {
+    throw new Error(`Invalid JSON: ${data.length > 80 ? data.slice(0, 80) + "..." : data}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
