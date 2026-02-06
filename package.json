@@ -1,20 +1,22 @@
 {
   "name": "unifi-cli",
   "version": "0.1.0",
-  "description": "CLI for the UniFi Network API — auto-generated from the OpenAPI spec, optimized for AI/LLM usage",
+  "description": "CLI and MCP server for the UniFi Network API — auto-generated from the OpenAPI spec, optimized for AI/LLM usage",
   "type": "module",
   "bin": {
-    "unifi-cli": "./dist/index.js"
+    "unifi-cli": "./src/index.ts"
   },
   "files": [
-    "dist",
-    "openapi.json"
+    "src",
+    "!src/__tests__",
+    "openapi.json",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "start": "node dist/index.js",
-    "prepublishOnly": "tsc"
+    "start": "bun run src/index.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
   },
   "keywords": [
     "unifi",
@@ -22,18 +24,30 @@
     "network",
     "cli",
     "api",
-    "openapi"
+    "openapi",
+    "mcp",
+    "model-context-protocol",
+    "llm"
   ],
+  "author": "Luca Silverentand",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucasilverentand/unifi-cli.git"
+  },
+  "homepage": "https://github.com/lucasilverentand/unifi-cli#readme",
+  "bugs": {
+    "url": "https://github.com/lucasilverentand/unifi-cli/issues"
+  },
   "engines": {
-    "node": ">=18"
+    "bun": ">=1.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "commander": "^13.1.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/bun": "latest",
     "typescript": "^5.7.0"
   }
 }
