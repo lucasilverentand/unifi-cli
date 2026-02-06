@@ -5,7 +5,21 @@ on:
     types: [published]
 
 jobs:
-  publish:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - run: bun test
+
+  publish-npm:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,11 +33,37 @@ jobs:
 
       - run: bun install
 
-      - run: bun test
-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - run: npm publish --provenance --access public
+
+  publish-github:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@lucasilverentand"
+
+      - name: Set scoped package name for GitHub Packages
+        run: npm pkg set name="@lucasilverentand/unifi-cli"
+
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
