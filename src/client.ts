@@ -13,7 +13,11 @@ export class UnifiClient {
 
   buildUrl(options: RequestOptions): URL {
     const base = this.baseUrl.replace(/\/+$/, "");
-    const url = new URL(`${base}/integration${options.path}`);
+    // If the base URL doesn't already include a path prefix (like /proxy/network),
+    // add /proxy/network for UniFi OS gateways (UDM, UDR, UCG, etc.)
+    const parsed = new URL(base);
+    const prefix = parsed.pathname === "/" ? "/proxy/network" : "";
+    const url = new URL(`${base}${prefix}/integration${options.path}`);
     if (options.query) {
       for (const [k, v] of Object.entries(options.query)) {
         if (v !== undefined && v !== "") url.searchParams.set(k, v);
@@ -32,27 +36,36 @@ export class UnifiClient {
       headers["Content-Type"] = "application/json";
     }
 
-    const resp = await fetch(url.toString(), {
+    const resp = await fetch(url, {
       method: options.method,
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
 
-    const text = await resp.text();
-
     if (!resp.ok) {
       let parsed: unknown;
       try {
-        parsed = JSON.parse(text);
+        parsed = await resp.json();
       } catch {
-        parsed = { statusCode: resp.status, message: text };
+        parsed = { statusCode: resp.status, message: await resp.text() };
       }
       const err = new Error(`HTTP ${resp.status}`);
       (err as any).response = parsed;
       throw err;
     }
 
+    const text = await resp.text();
     if (!text) return {};
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      const err = new Error(
+        `Expected JSON from ${url.pathname} but got non-JSON response (status ${resp.status}). ` +
+        `This usually means a TLS/certificate issue or wrong URL. ` +
+        `Snippet: ${text.slice(0, 200)}`
+      );
+      (err as any).response = { statusCode: resp.status, body: text.slice(0, 500) };
+      throw err;
+    }
   }
 }
