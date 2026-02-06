@@ -1,6 +1,6 @@
 {
   "name": "unifi-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI and MCP server for the UniFi Network API — auto-generated from the OpenAPI spec, optimized for AI/LLM usage",
   "type": "module",
   "bin": {
