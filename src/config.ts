@@ -1,15 +1,15 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export interface Config {
   url?: string;
   apiKey?: string;
   site: string;
   insecure?: boolean;
+  readOnly?: boolean;
 }
 
-const CONFIG_DIR = join(homedir(), ".config", "unifi-cli");
+const CONFIG_DIR = join(Bun.env.HOME ?? "~", ".config", "unifi-cli");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export function loadFileConfig(): Partial<Config> {
@@ -25,22 +25,24 @@ export function saveConfig(config: Partial<Config>): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
   const existing = loadFileConfig();
   const merged = { ...existing, ...config };
-  writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n");
+  Bun.write(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n");
 }
 
 export function resolveConfig(cliOpts: Record<string, unknown>): Config {
   const file = loadFileConfig();
   return {
-    url: (cliOpts.url as string) || process.env.UNIFI_URL || file.url,
+    url: (cliOpts.url as string) || Bun.env.UNIFI_URL || file.url,
     apiKey:
-      (cliOpts.apiKey as string) || process.env.UNIFI_API_KEY || file.apiKey,
+      (cliOpts.apiKey as string) || Bun.env.UNIFI_API_KEY || file.apiKey,
     site:
       (cliOpts.site as string) ||
-      process.env.UNIFI_SITE ||
+      Bun.env.UNIFI_SITE ||
       file.site ||
       "default",
     insecure:
-      !!(cliOpts.insecure || process.env.UNIFI_INSECURE === "1" || file.insecure),
+      !!(cliOpts.insecure || Bun.env.UNIFI_INSECURE === "1" || file.insecure),
+    readOnly:
+      !!(cliOpts.readOnly || Bun.env.UNIFI_READ_ONLY === "1" || file.readOnly),
   };
 }
 

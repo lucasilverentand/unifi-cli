@@ -1,6 +1,6 @@
-import type { CmdDef } from "./commands.js";
-import type { UnifiClient } from "./client.js";
-import { camelCase } from "./commands.js";
+import type { CmdDef } from "./commands.ts";
+import type { UnifiClient } from "./client.ts";
+import { camelCase } from "./commands.ts";
 
 export interface ExecuteParams {
   /** Site ID (used when cmd.needsSite is true) */

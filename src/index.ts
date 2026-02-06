@@ -1,11 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { Command } from "commander";
-import { createRequire } from "node:module";
-import { readFileSync } from "fs";
-import { resolveConfig, requireConfig, saveConfig, type Config } from "./config.js";
-import { UnifiClient } from "./client.js";
-import { formatOutput, pickFields } from "./output.js";
+import { resolveConfig, requireConfig, saveConfig, type Config } from "./config.ts";
+import { UnifiClient } from "./client.ts";
+import { formatOutput, pickFields } from "./output.ts";
 import {
   loadSpec,
   findOperation,
@@ -15,12 +13,11 @@ import {
   getOperationResponseRef,
   schemaName,
   type OpenAPISpec,
-} from "./schema.js";
-import { COMMANDS, GROUP_DESCRIPTIONS, camelCase, type CmdDef } from "./commands.js";
-import { resolveRequest, executeCommand, executeAllPages } from "./execute.js";
+} from "./schema.ts";
+import { COMMANDS, GROUP_DESCRIPTIONS, camelCase, type CmdDef } from "./commands.ts";
+import { resolveRequest, executeCommand, executeAllPages } from "./execute.ts";
 
-const require = createRequire(import.meta.url);
-const pkg = require("../package.json") as { version: string };
+const pkg = await Bun.file(`${import.meta.dir}/../package.json`).json() as { version: string };
 
 // ---------------------------------------------------------------------------
 // CLI setup
@@ -176,7 +173,7 @@ program
   .action(async (method: string, path: string, opts: Record<string, unknown>) => {
     const globalOpts = program.opts();
     const config = resolveConfig(globalOpts);
-    if (config.insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    if (config.insecure) Bun.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
     const query: Record<string, string> = {};
     if (opts.query) {
@@ -222,8 +219,10 @@ program
 program
   .command("mcp")
   .description("Start MCP server (stdio) — exposes all operations as LLM tools")
-  .action(async () => {
-    const { startMcpServer } = await import("./mcp.js");
+  .option("--read-only", "Only expose read (GET) operations — no create/update/delete")
+  .action(async (opts: Record<string, unknown>) => {
+    if (opts.readOnly) Bun.env.UNIFI_READ_ONLY = "1";
+    const { startMcpServer } = await import("./mcp.ts");
     await startMcpServer();
   });
 
@@ -314,7 +313,7 @@ function registerAction(parent: Command, cmd: CmdDef, spec: OpenAPISpec) {
 
     // Handle --insecure
     if (config.insecure) {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      Bun.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
     }
 
     // Build ExecuteParams from CLI args/opts
@@ -395,16 +394,11 @@ function registerAction(parent: Command, cmd: CmdDef, spec: OpenAPISpec) {
 async function resolveBody(data: string): Promise<unknown> {
   if (data === "-") {
     // Read from stdin
-    const chunks: Buffer[] = [];
-    for await (const chunk of process.stdin) {
-      chunks.push(chunk as Buffer);
-    }
-    return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+    return Bun.stdin.json();
   }
   if (data.startsWith("@")) {
     // Read from file
-    const content = readFileSync(data.slice(1), "utf-8");
-    return JSON.parse(content);
+    return Bun.file(data.slice(1)).json();
   }
   return JSON.parse(data);
 }

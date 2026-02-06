@@ -1,9 +1,4 @@
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { readFileSync } from "node:fs";
 
 export interface OpenAPISpec {
   info: { title: string; version: string };
@@ -48,7 +43,7 @@ let _spec: OpenAPISpec | null = null;
 
 export function loadSpec(): OpenAPISpec {
   if (_spec) return _spec;
-  const specPath = join(__dirname, "..", "openapi.json");
+  const specPath = `${import.meta.dir}/../openapi.json`;
   _spec = JSON.parse(readFileSync(specPath, "utf-8"));
   return _spec!;
 }
@@ -204,6 +199,77 @@ function structuredProps(
     }
   }
 
+  return result;
+}
+
+/** Convert an OpenAPI schema/ref into a self-contained JSON Schema object */
+export function toJsonSchema(
+  spec: OpenAPISpec,
+  schemaOrRef: SchemaRef,
+  maxDepth = 3,
+  _seen?: Set<string>,
+): Record<string, unknown> {
+  const seen = _seen ?? new Set<string>();
+
+  // Depth guard
+  if (maxDepth <= 0) return { type: "object" };
+
+  // Resolve $ref
+  if (schemaOrRef.$ref) {
+    if (seen.has(schemaOrRef.$ref)) return { type: "object" };
+    seen.add(schemaOrRef.$ref);
+    const resolved = resolveRef(spec, schemaOrRef.$ref);
+    if (!resolved) return { type: "object" };
+    return toJsonSchema(spec, resolved, maxDepth - 1, seen);
+  }
+
+  // oneOf / anyOf / allOf
+  for (const key of ["oneOf", "anyOf", "allOf"] as const) {
+    const variants = schemaOrRef[key];
+    if (variants) {
+      return {
+        [key]: variants.map((v) => toJsonSchema(spec, v, maxDepth - 1, new Set(seen))),
+      };
+    }
+  }
+
+  // Array
+  if (schemaOrRef.type === "array") {
+    const result: Record<string, unknown> = { type: "array" };
+    if (schemaOrRef.items) {
+      result.items = toJsonSchema(spec, schemaOrRef.items, maxDepth - 1, new Set(seen));
+    }
+    return result;
+  }
+
+  // Object (or has properties)
+  if (schemaOrRef.type === "object" || schemaOrRef.properties) {
+    const result: Record<string, unknown> = { type: "object" };
+    if (schemaOrRef.properties) {
+      const props: Record<string, unknown> = {};
+      for (const [name, prop] of Object.entries(schemaOrRef.properties)) {
+        props[name] = toJsonSchema(spec, prop, maxDepth - 1, new Set(seen));
+      }
+      result.properties = props;
+    }
+    if (schemaOrRef.required) result.required = schemaOrRef.required;
+    if (schemaOrRef.description) result.description = schemaOrRef.description;
+    return result;
+  }
+
+  // Enum
+  if (schemaOrRef.enum) {
+    const result: Record<string, unknown> = {
+      type: schemaOrRef.type ?? "string",
+      enum: schemaOrRef.enum,
+    };
+    if (schemaOrRef.description) result.description = schemaOrRef.description;
+    return result;
+  }
+
+  // Primitive
+  const result: Record<string, unknown> = { type: schemaOrRef.type ?? "object" };
+  if (schemaOrRef.description) result.description = schemaOrRef.description;
   return result;
 }
 
