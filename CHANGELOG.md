@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/lucasilverentand/unifi-cli/compare/unifi-cli-v0.3.0...unifi-cli-v0.4.0) (2026-03-04)
+
+
+### Features
+
+* add protection levels and two-step confirmation for critical operations ([1289540](https://github.com/lucasilverentand/unifi-cli/commit/128954091e79304d2462129ccbaaec883e09ca44))
+* make MCP server fully AI-agent ready ([eb1df23](https://github.com/lucasilverentand/unifi-cli/commit/eb1df23a5212d8abefa2e17dc415d063ea2faa50))
+
 ## [0.3.0](https://github.com/lucasilverentand/unifi-cli/compare/unifi-cli-v0.2.0...unifi-cli-v0.3.0) (2026-02-06)
 
 
