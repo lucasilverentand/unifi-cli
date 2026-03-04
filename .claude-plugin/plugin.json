@@ -1,0 +1,18 @@
+{
+  "name": "unifi-cli",
+  "version": "0.3.0",
+  "description": "Skills for managing UniFi networks — audit, troubleshoot, and provision via the unifi-cli MCP server",
+  "author": {
+    "name": "Luca Silverentand",
+    "url": "https://github.com/lucasilverentand"
+  },
+  "skills": "./skills/",
+  "keywords": [
+    "unifi",
+    "ubiquiti",
+    "network",
+    "mcp",
+    "firewall",
+    "wifi"
+  ]
+}

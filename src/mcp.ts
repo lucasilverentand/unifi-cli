@@ -9,7 +9,7 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { COMMANDS, toolName, type CmdDef } from "./commands.ts";
+import { COMMANDS, toolName, buildToolAnnotations, buildToolDescription, type CmdDef } from "./commands.ts";
 import { resolveConfig } from "./config.ts";
 import { UnifiClient } from "./client.ts";
 import { executeCommand, executeAllPages } from "./execute.ts";
@@ -132,7 +132,25 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
 
   const server = new Server(
     { name: "unifi-cli", version: pkg.version },
-    { capabilities: { tools: {}, resources: {}, prompts: {} } },
+    {
+      capabilities: { tools: {}, resources: {}, prompts: {} },
+      instructions: [
+        "UniFi Network MCP Server — manages a Ubiquiti UniFi controller via the Integration API.",
+        "",
+        "Getting started:",
+        "1. Call sites_list first to discover available sites and their UUIDs.",
+        "2. Most tools require a siteId parameter — pass the UUID from step 1.",
+        "3. If you omit siteId, it defaults to the configured site (usually \"default\", auto-resolved to its UUID).",
+        "",
+        "Pagination: list endpoints auto-fetch all pages when you omit offset/limit. Pass explicit values only if you need a specific page.",
+        "",
+        "Firewall model: zones group networks; policies define rules between zone pairs. To audit firewall config, read zones first, then policies, then check ordering per zone pair.",
+        "",
+        "Safety: destructive tools (DELETE) are annotated with destructiveHint=true. In read-only mode (UNIFI_READ_ONLY=1), only GET tools are available.",
+        "",
+        "TLS: UniFi controllers use self-signed certificates. This server automatically trusts them.",
+      ].join("\n"),
+    },
   );
 
   // Helper: create an authenticated client or throw
@@ -174,8 +192,9 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
       : COMMANDS;
     const tools = cmds.map((cmd) => ({
       name: toolName(cmd),
-      description: `${cmd.summary}. API: ${cmd.method} ${cmd.path}`,
+      description: buildToolDescription(cmd),
       inputSchema: buildInputSchema(cmd),
+      annotations: buildToolAnnotations(cmd),
     }));
     return { tools };
   });
@@ -324,6 +343,24 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
           description: "List connected clients on a site",
           mimeType: "application/json",
         },
+        {
+          uriTemplate: "unifi://sites/{siteId}/firewall",
+          name: "Firewall",
+          description: "Composite view of firewall zones and policies for a site",
+          mimeType: "application/json",
+        },
+        {
+          uriTemplate: "unifi://sites/{siteId}/wifi",
+          name: "WiFi",
+          description: "List WiFi broadcasts (SSIDs) on a site",
+          mimeType: "application/json",
+        },
+        {
+          uriTemplate: "unifi://sites/{siteId}/vpn",
+          name: "VPN",
+          description: "Composite view of VPN tunnels and servers for a site",
+          mimeType: "application/json",
+        },
       ],
     };
   });
@@ -383,6 +420,41 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
       };
     }
 
+    // Composite templates: firewall, wifi, vpn
+    const compositeMatch = uri.match(/^unifi:\/\/sites\/([^/]+)\/(firewall|wifi|vpn)$/);
+    if (compositeMatch) {
+      const [, rawSiteId, resource] = compositeMatch;
+      const resolvedSiteId = await resolveSiteId(rawSiteId, client);
+      const siteArgs = { siteId: resolvedSiteId, args: {} };
+
+      if (resource === "firewall") {
+        const [zones, policies] = await Promise.all([
+          executeAllPages(findCmd("getFirewallZones")!, siteArgs, client),
+          executeAllPages(findCmd("getFirewallPolicies")!, siteArgs, client),
+        ]);
+        return {
+          contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ zones, policies }, null, 2) }],
+        };
+      }
+
+      if (resource === "wifi") {
+        const broadcasts = await executeAllPages(findCmd("getWifiBroadcastPage")!, siteArgs, client);
+        return {
+          contents: [{ uri, mimeType: "application/json", text: JSON.stringify(broadcasts, null, 2) }],
+        };
+      }
+
+      if (resource === "vpn") {
+        const [tunnels, servers] = await Promise.all([
+          executeAllPages(findCmd("getSiteToSiteVpnTunnelPage")!, siteArgs, client),
+          executeAllPages(findCmd("getVpnServerPage")!, siteArgs, client),
+        ]);
+        return {
+          contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ tunnels, servers }, null, 2) }],
+        };
+      }
+    }
+
     throw new Error(`Unknown resource URI: ${uri}`);
   });
 
@@ -409,6 +481,28 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
           description: "Check device health — CPU, memory, uptime, and connectivity",
           arguments: [
             { name: "siteId", description: "Site ID to check", required: true },
+          ],
+        },
+        {
+          name: "troubleshoot-connectivity",
+          description: "Diagnose connectivity issues using an OSI-model approach",
+          arguments: [
+            { name: "siteId", description: "Site ID to troubleshoot", required: true },
+            { name: "target", description: "Optional target client or device to focus on", required: false },
+          ],
+        },
+        {
+          name: "wifi-optimization",
+          description: "Analyze WiFi configuration and suggest optimizations",
+          arguments: [
+            { name: "siteId", description: "Site ID to analyze", required: true },
+          ],
+        },
+        {
+          name: "security-hardening",
+          description: "Review network security posture and recommend hardening measures",
+          arguments: [
+            { name: "siteId", description: "Site ID to review", required: true },
           ],
         },
       ],
@@ -496,6 +590,120 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
                   "- Flag any devices with high CPU (>80%), high memory (>80%), or recent restarts (uptime < 1 hour).",
                   "- Note any devices that are offline or unreachable.",
                   "- Provide recommendations for any issues found.",
+                ].join("\n"),
+              },
+            },
+          ],
+        };
+
+      case "troubleshoot-connectivity": {
+        const target = promptArgs?.target;
+        const targetHint = target
+          ? `Focus on this specific client or device: "${target}".`
+          : "No specific target — investigate general connectivity.";
+        return {
+          messages: [
+            {
+              role: "user" as const,
+              content: {
+                type: "text" as const,
+                text: [
+                  `Troubleshoot connectivity issues for site "${siteId}".`,
+                  targetHint,
+                  "",
+                  "Use an OSI-model bottom-up approach:",
+                  "",
+                  "Layer 1 — Physical:",
+                  `1. Use **devices_list** (siteId: "${siteId}") to check device status and uptime.`,
+                  `2. For each device, use **devices_stats** to check for errors or high utilization.`,
+                  "",
+                  "Layer 2 — Data Link:",
+                  `3. Use **clients_list** (siteId: "${siteId}") to check client connections and signal quality.`,
+                  `4. Use **wifi_list** (siteId: "${siteId}") to verify SSID configuration.`,
+                  "",
+                  "Layer 3 — Network:",
+                  `5. Use **networks_list** (siteId: "${siteId}") to verify subnet/VLAN config.`,
+                  `6. Use **wans_list** (siteId: "${siteId}") to check WAN link status.`,
+                  "",
+                  "Layer 3+ — Firewall/Routing:",
+                  `7. Use **firewall_zones_list** and **firewall_policies_list** to check for blocking rules.`,
+                  `8. Use **dns_list** (siteId: "${siteId}") to check DNS policies.`,
+                  "",
+                  "For each layer, report:",
+                  "- Status: OK / Warning / Error",
+                  "- Findings and potential root causes",
+                  "- Recommended fixes (ordered by likelihood)",
+                ].join("\n"),
+              },
+            },
+          ],
+        };
+      }
+
+      case "wifi-optimization":
+        return {
+          messages: [
+            {
+              role: "user" as const,
+              content: {
+                type: "text" as const,
+                text: [
+                  `Analyze WiFi configuration and suggest optimizations for site "${siteId}".`,
+                  "",
+                  "Steps:",
+                  `1. Use **wifi_list** (siteId: "${siteId}") to get all WiFi broadcasts (SSIDs).`,
+                  `2. Use **networks_list** (siteId: "${siteId}") to understand VLAN assignments.`,
+                  `3. Use **devices_list** (siteId: "${siteId}") to identify APs and their models.`,
+                  `4. Use **clients_list** (siteId: "${siteId}") to see client distribution.`,
+                  `5. Use **device_tags_list** (siteId: "${siteId}") to check AP group assignments.`,
+                  `6. Use **radius_profiles_list** (siteId: "${siteId}") to review auth profiles.`,
+                  "",
+                  "Analyze and report on:",
+                  "- SSID count (recommend ≤4 per radio to reduce beacon overhead)",
+                  "- Security settings per SSID (WPA3 preferred, flag WPA2-only or open networks)",
+                  "- Band steering / WiFi 6E readiness",
+                  "- VLAN-to-SSID mapping (each SSID should have its own VLAN for segmentation)",
+                  "- Client load balancing across APs",
+                  "- Guest network isolation",
+                  "- Recommendations prioritized by impact",
+                ].join("\n"),
+              },
+            },
+          ],
+        };
+
+      case "security-hardening":
+        return {
+          messages: [
+            {
+              role: "user" as const,
+              content: {
+                type: "text" as const,
+                text: [
+                  `Review security posture and recommend hardening for site "${siteId}".`,
+                  "",
+                  "Gather data:",
+                  `1. Use **networks_list** (siteId: "${siteId}") to review network segmentation.`,
+                  `2. Use **firewall_zones_list** and **firewall_policies_list** (siteId: "${siteId}") for firewall posture.`,
+                  `3. Use **wifi_list** (siteId: "${siteId}") for WiFi security settings.`,
+                  `4. Use **dns_list** (siteId: "${siteId}") for DNS filtering policies.`,
+                  `5. Use **vpn_tunnels_list** and **vpn_servers_list** (siteId: "${siteId}") for VPN config.`,
+                  `6. Use **acl_list** (siteId: "${siteId}") for layer 2 access control.`,
+                  `7. Use **devices_list** (siteId: "${siteId}") to check firmware versions.`,
+                  "",
+                  "Audit areas:",
+                  "- **Segmentation**: Are IoT, guest, and management networks properly isolated?",
+                  "- **Firewall**: Is there a default-deny between zones? Any allow-all rules?",
+                  "- **WiFi**: WPA3 adoption, open/guest network isolation, rogue AP detection",
+                  "- **DNS**: Is DNS filtering active? Are there bypass risks?",
+                  "- **VPN**: Are tunnels using strong encryption? Any deprecated protocols?",
+                  "- **Access Control**: Are ACL rules in place for sensitive VLANs?",
+                  "- **Firmware**: Are all devices on the latest stable firmware?",
+                  "",
+                  "Output format:",
+                  "1. Executive summary (1-2 paragraphs)",
+                  "2. Findings table: Area | Severity (Critical/High/Medium/Low) | Finding | Recommendation",
+                  "3. Prioritized remediation plan",
                 ].join("\n"),
               },
             },

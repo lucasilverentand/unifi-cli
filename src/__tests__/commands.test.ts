@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { COMMANDS, camelCase, toolName } from "../commands.ts";
+import { COMMANDS, camelCase, toolName, buildToolAnnotations, buildToolDescription, RELATED_GROUPS, GROUP_DESCRIPTIONS } from "../commands.ts";
 
 describe("camelCase", () => {
   test("kebab-case becomes camelCase", () => {
@@ -59,5 +59,68 @@ describe("COMMANDS", () => {
     const names = COMMANDS.map((c) => toolName(c));
     const unique = new Set(names);
     expect(unique.size).toBe(names.length);
+  });
+});
+
+describe("buildToolAnnotations", () => {
+  test("GET command is readOnly, not destructive, idempotent", () => {
+    const cmd = COMMANDS.find((c) => c.method === "GET")!;
+    const ann = buildToolAnnotations(cmd);
+    expect(ann.readOnlyHint).toBe(true);
+    expect(ann.destructiveHint).toBe(false);
+    expect(ann.idempotentHint).toBe(true);
+    expect(ann.openWorldHint).toBe(false);
+  });
+
+  test("DELETE command is destructive, not readOnly, idempotent", () => {
+    const cmd = COMMANDS.find((c) => c.method === "DELETE")!;
+    const ann = buildToolAnnotations(cmd);
+    expect(ann.readOnlyHint).toBe(false);
+    expect(ann.destructiveHint).toBe(true);
+    expect(ann.idempotentHint).toBe(true);
+  });
+
+  test("POST command is not readOnly, not idempotent", () => {
+    const cmd = COMMANDS.find((c) => c.method === "POST")!;
+    const ann = buildToolAnnotations(cmd);
+    expect(ann.readOnlyHint).toBe(false);
+    expect(ann.idempotentHint).toBe(false);
+  });
+
+  test("PUT command is idempotent, not readOnly", () => {
+    const cmd = COMMANDS.find((c) => c.method === "PUT")!;
+    const ann = buildToolAnnotations(cmd);
+    expect(ann.readOnlyHint).toBe(false);
+    expect(ann.idempotentHint).toBe(true);
+  });
+
+  test("title matches command summary", () => {
+    const cmd = COMMANDS.find((c) => c.operationId === "getInfo")!;
+    const ann = buildToolAnnotations(cmd);
+    expect(ann.title).toBe(cmd.summary);
+  });
+});
+
+describe("buildToolDescription", () => {
+  test("grouped command includes group context and related groups", () => {
+    const cmd = COMMANDS.find((c) => c.group === "networks" && c.action === "list")!;
+    const desc = buildToolDescription(cmd);
+    expect(desc).toContain(cmd.summary);
+    expect(desc).toContain("Group: networks");
+    expect(desc).toContain(GROUP_DESCRIPTIONS.networks);
+    expect(desc).toContain("Related:");
+    for (const rel of RELATED_GROUPS.networks) {
+      expect(desc).toContain(rel);
+    }
+    expect(desc).toContain(`API: ${cmd.method} ${cmd.path}`);
+  });
+
+  test("top-level command has no group context", () => {
+    const cmd = COMMANDS.find((c) => c.group === null && c.action === "info")!;
+    const desc = buildToolDescription(cmd);
+    expect(desc).toContain(cmd.summary);
+    expect(desc).toContain(`API: GET`);
+    expect(desc).not.toContain("Group:");
+    expect(desc).not.toContain("Related:");
   });
 });

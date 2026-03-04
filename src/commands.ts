@@ -528,6 +528,72 @@ export const GROUP_DESCRIPTIONS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Related groups — cross-references for agent discovery
+// ---------------------------------------------------------------------------
+
+export const RELATED_GROUPS: Record<string, string[]> = {
+  networks: ["firewall-zones", "wifi", "wans", "vpn-tunnels"],
+  "firewall-zones": ["firewall-policies", "networks"],
+  "firewall-policies": ["firewall-zones", "traffic-lists", "acl"],
+  wifi: ["networks", "device-tags", "radius-profiles"],
+  dns: ["networks", "traffic-lists"],
+  devices: ["clients", "device-tags"],
+  clients: ["devices", "networks"],
+  hotspot: ["wifi", "networks"],
+  acl: ["firewall-policies", "traffic-lists"],
+  "traffic-lists": ["firewall-policies", "acl", "dns"],
+  "vpn-tunnels": ["networks", "vpn-servers"],
+  "vpn-servers": ["vpn-tunnels", "networks"],
+  wans: ["networks", "vpn-tunnels"],
+};
+
+// ---------------------------------------------------------------------------
+// Tool annotations — MCP readOnlyHint / destructiveHint / etc.
+// ---------------------------------------------------------------------------
+
+export interface ToolAnnotations {
+  title: string;
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
+export function buildToolAnnotations(cmd: CmdDef): ToolAnnotations {
+  const m = cmd.method.toUpperCase();
+  return {
+    title: cmd.summary,
+    readOnlyHint: m === "GET" || m === "HEAD" || m === "OPTIONS",
+    destructiveHint: m === "DELETE",
+    idempotentHint: m === "GET" || m === "PUT" || m === "DELETE",
+    openWorldHint: false, // closed UniFi API
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Enriched tool descriptions
+// ---------------------------------------------------------------------------
+
+export function buildToolDescription(cmd: CmdDef): string {
+  const lines: string[] = [cmd.summary];
+
+  // Group context
+  if (cmd.group && GROUP_DESCRIPTIONS[cmd.group]) {
+    lines.push("", `Group: ${cmd.group} — ${GROUP_DESCRIPTIONS[cmd.group]}`);
+  }
+
+  // Related groups
+  if (cmd.group && RELATED_GROUPS[cmd.group]) {
+    lines.push(`Related: ${RELATED_GROUPS[cmd.group].join(", ")}`);
+  }
+
+  // API reference
+  lines.push("", `API: ${cmd.method} ${cmd.path}`);
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

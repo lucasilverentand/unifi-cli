@@ -77,19 +77,63 @@ describe("MCP server", () => {
     expect(uris).toContain("unifi://spec");
   });
 
-  test("resources/templates/list returns 3 templates", async () => {
+  test("resources/templates/list returns 6 templates", async () => {
     const { resourceTemplates } = await client.listResourceTemplates();
-    expect(resourceTemplates.length).toBe(3);
+    expect(resourceTemplates.length).toBe(6);
+
+    const uriTemplates = resourceTemplates.map((t) => t.uriTemplate);
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/devices");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/networks");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/clients");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/firewall");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/wifi");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/vpn");
   });
 
-  test("prompts/list returns 3 prompts with siteId argument", async () => {
+  test("prompts/list returns 6 prompts with siteId argument", async () => {
     const { prompts } = await client.listPrompts();
-    expect(prompts.length).toBe(3);
+    expect(prompts.length).toBe(6);
 
     for (const prompt of prompts) {
       expect(prompt.arguments!.length).toBeGreaterThanOrEqual(1);
       expect(prompt.arguments![0].name).toBe("siteId");
     }
+  });
+
+  test("tools have annotations with readOnlyHint and destructiveHint", async () => {
+    const { tools } = await client.listTools();
+
+    // GET tool should be readOnly
+    const infoTool = tools.find((t) => t.name === "info");
+    expect(infoTool).toBeDefined();
+    expect((infoTool as any).annotations.readOnlyHint).toBe(true);
+    expect((infoTool as any).annotations.destructiveHint).toBe(false);
+
+    // DELETE tool should be destructive
+    const deleteTool = tools.find((t) => t.name === "networks_delete");
+    expect(deleteTool).toBeDefined();
+    expect((deleteTool as any).annotations.readOnlyHint).toBe(false);
+    expect((deleteTool as any).annotations.destructiveHint).toBe(true);
+
+    // POST tool should not be idempotent
+    const createTool = tools.find((t) => t.name === "networks_create");
+    expect(createTool).toBeDefined();
+    expect((createTool as any).annotations.idempotentHint).toBe(false);
+
+    // All tools should have openWorldHint=false
+    for (const tool of tools) {
+      expect((tool as any).annotations.openWorldHint).toBe(false);
+    }
+  });
+
+  test("tool descriptions include group context and API reference", async () => {
+    const { tools } = await client.listTools();
+
+    const networksTool = tools.find((t) => t.name === "networks_list");
+    expect(networksTool).toBeDefined();
+    expect(networksTool!.description).toContain("Group: networks");
+    expect(networksTool!.description).toContain("Related:");
+    expect(networksTool!.description).toContain("API: GET");
   });
 
   test("prompts/get for audit-firewall returns messages with siteId substituted", async () => {
@@ -589,6 +633,80 @@ describe("MCP resources/read", () => {
     globalThis.fetch = originalFetch;
   });
 
+  test("read unifi://sites/{siteId}/firewall returns composite zones + policies", async () => {
+    const mockFetch = mock((url: URL | string) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("/firewall/zones")) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ data: [{ id: "zone-1", name: "LAN" }], offset: 0, limit: 200, count: 1, totalCount: 1 }),
+          { status: 200 },
+        ));
+      }
+      if (urlStr.includes("/firewall/policies")) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ data: [{ id: "pol-1", action: "ALLOW" }], offset: 0, limit: 200, count: 1, totalCount: 1 }),
+          { status: 200 },
+        ));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: [], offset: 0, limit: 200, count: 0, totalCount: 0 }), { status: 200 }));
+    });
+    globalThis.fetch = mockFetch;
+
+    const result = await rrClient.readResource({ uri: "unifi://sites/88f7af54-0000-0000-0000-000000000000/firewall" });
+    const parsed = JSON.parse(result.contents[0].text as string);
+    expect(parsed.zones).toBeDefined();
+    expect(parsed.policies).toBeDefined();
+    expect(parsed.zones.data[0].name).toBe("LAN");
+    expect(parsed.policies.data[0].action).toBe("ALLOW");
+
+    globalThis.fetch = originalFetch;
+  });
+
+  test("read unifi://sites/{siteId}/wifi returns broadcasts", async () => {
+    const mockFetch = mock(() => {
+      return Promise.resolve(new Response(
+        JSON.stringify({ data: [{ id: "wifi-1", ssid: "MyNetwork" }], offset: 0, limit: 200, count: 1, totalCount: 1 }),
+        { status: 200 },
+      ));
+    });
+    globalThis.fetch = mockFetch;
+
+    const result = await rrClient.readResource({ uri: "unifi://sites/88f7af54-0000-0000-0000-000000000000/wifi" });
+    const parsed = JSON.parse(result.contents[0].text as string);
+    expect(parsed.data[0].ssid).toBe("MyNetwork");
+
+    globalThis.fetch = originalFetch;
+  });
+
+  test("read unifi://sites/{siteId}/vpn returns composite tunnels + servers", async () => {
+    const mockFetch = mock((url: URL | string) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("/site-to-site-tunnels")) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ data: [{ id: "tun-1", name: "Office" }], offset: 0, limit: 200, count: 1, totalCount: 1 }),
+          { status: 200 },
+        ));
+      }
+      if (urlStr.includes("/vpn/servers")) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ data: [{ id: "srv-1", type: "wireguard" }], offset: 0, limit: 200, count: 1, totalCount: 1 }),
+          { status: 200 },
+        ));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: [], offset: 0, limit: 200, count: 0, totalCount: 0 }), { status: 200 }));
+    });
+    globalThis.fetch = mockFetch;
+
+    const result = await rrClient.readResource({ uri: "unifi://sites/88f7af54-0000-0000-0000-000000000000/vpn" });
+    const parsed = JSON.parse(result.contents[0].text as string);
+    expect(parsed.tunnels).toBeDefined();
+    expect(parsed.servers).toBeDefined();
+    expect(parsed.tunnels.data[0].name).toBe("Office");
+    expect(parsed.servers.data[0].type).toBe("wireguard");
+
+    globalThis.fetch = originalFetch;
+  });
+
   test("read unknown URI throws error", async () => {
     expect(
       rrClient.readResource({ uri: "unifi://nonexistent" }),
@@ -623,6 +741,49 @@ describe("MCP prompts/get", () => {
     const content = result.messages[0].content as { type: string; text: string };
     expect(content.text).toContain("health-site");
     expect(content.text).toContain("health");
+  });
+
+  test("troubleshoot-connectivity returns messages with siteId and optional target", async () => {
+    const result = await client.getPrompt({
+      name: "troubleshoot-connectivity",
+      arguments: { siteId: "ts-site", target: "my-laptop" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("ts-site");
+    expect(content.text).toContain("my-laptop");
+    expect(content.text).toContain("OSI");
+  });
+
+  test("troubleshoot-connectivity without target mentions general connectivity", async () => {
+    const result = await client.getPrompt({
+      name: "troubleshoot-connectivity",
+      arguments: { siteId: "ts-site" },
+    });
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("general connectivity");
+  });
+
+  test("wifi-optimization returns messages with siteId", async () => {
+    const result = await client.getPrompt({
+      name: "wifi-optimization",
+      arguments: { siteId: "wifi-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("wifi-site");
+    expect(content.text).toContain("WiFi");
+  });
+
+  test("security-hardening returns messages with siteId", async () => {
+    const result = await client.getPrompt({
+      name: "security-hardening",
+      arguments: { siteId: "sec-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("sec-site");
+    expect(content.text).toContain("hardening");
   });
 
   test("unknown prompt throws error", async () => {
