@@ -2,11 +2,12 @@ import { describe, expect, test, beforeAll, afterAll, mock } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { startMcpServer } from "../mcp.ts";
-import { COMMANDS, toolName } from "../commands.ts";
+import { COMMANDS, toolName, cmdAllowedAtLevel } from "../commands.ts";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 // ---------------------------------------------------------------------------
 // Set up an in-process MCP server + client using InMemoryTransport
+// (unrestricted mode so all tools are visible for general tests)
 // ---------------------------------------------------------------------------
 
 let client: Client;
@@ -15,6 +16,7 @@ let server: Server;
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
 beforeAll(async () => {
+  Bun.env.UNIFI_PROTECTION = "unrestricted";
   // Start the MCP server with the in-memory transport
   server = await startMcpServer(serverTransport);
 
@@ -24,6 +26,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  delete Bun.env.UNIFI_PROTECTION;
   await client.close();
   await server.close();
 });
@@ -103,22 +106,28 @@ describe("MCP server", () => {
   test("tools have annotations with readOnlyHint and destructiveHint", async () => {
     const { tools } = await client.listTools();
 
-    // GET tool should be readOnly
+    // GET tool should be readOnly and NOT destructive
     const infoTool = tools.find((t) => t.name === "info");
     expect(infoTool).toBeDefined();
     expect((infoTool as any).annotations.readOnlyHint).toBe(true);
     expect((infoTool as any).annotations.destructiveHint).toBe(false);
 
-    // DELETE tool should be destructive
+    // Critical DELETE tool should be destructive
     const deleteTool = tools.find((t) => t.name === "networks_delete");
     expect(deleteTool).toBeDefined();
     expect((deleteTool as any).annotations.readOnlyHint).toBe(false);
     expect((deleteTool as any).annotations.destructiveHint).toBe(true);
 
-    // POST tool should not be idempotent
+    // Dangerous POST tool should also be destructive (risk-based)
     const createTool = tools.find((t) => t.name === "networks_create");
     expect(createTool).toBeDefined();
+    expect((createTool as any).annotations.destructiveHint).toBe(true);
     expect((createTool as any).annotations.idempotentHint).toBe(false);
+
+    // Moderate POST tool should NOT be destructive
+    const moderateTool = tools.find((t) => t.name === "hotspot_create");
+    expect(moderateTool).toBeDefined();
+    expect((moderateTool as any).annotations.destructiveHint).toBe(false);
 
     // All tools should have openWorldHint=false
     for (const tool of tools) {
@@ -149,14 +158,13 @@ describe("MCP server", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Read-only mode tests
+// Read-only mode tests (UNIFI_READ_ONLY=1 backwards compat)
 // ---------------------------------------------------------------------------
 
-const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const READ_ONLY_COMMANDS = COMMANDS.filter((c) => READ_ONLY_METHODS.has(c.method));
-const WRITE_COMMANDS = COMMANDS.filter((c) => !READ_ONLY_METHODS.has(c.method));
+const READ_COMMANDS = COMMANDS.filter((c) => c.risk === "read");
+const NON_READ_COMMANDS = COMMANDS.filter((c) => c.risk !== "read");
 
-describe("MCP server (read-only mode)", () => {
+describe("MCP server (read-only mode via UNIFI_READ_ONLY=1)", () => {
   let roClient: Client;
   let roServer: Server;
 
@@ -175,21 +183,18 @@ describe("MCP server (read-only mode)", () => {
     await roServer.close();
   });
 
-  test("tools/list only returns GET commands", async () => {
+  test("tools/list only returns read-risk commands", async () => {
     const { tools } = await roClient.listTools();
-    expect(tools.length).toBe(READ_ONLY_COMMANDS.length);
+    expect(tools.length).toBe(READ_COMMANDS.length);
 
     const toolNames = new Set(tools.map((t) => t.name));
-    // Verify no write tools are listed
-    for (const cmd of WRITE_COMMANDS) {
-      const name = cmd.group
-        ? `${cmd.group.replace(/-/g, "_")}_${cmd.action.replace(/-/g, "_")}`
-        : cmd.action.replace(/-/g, "_");
-      expect(toolNames.has(name)).toBe(false);
+    // Verify no non-read tools are listed
+    for (const cmd of NON_READ_COMMANDS) {
+      expect(toolNames.has(toolName(cmd))).toBe(false);
     }
   });
 
-  test("calling a write tool returns an error", async () => {
+  test("calling a write tool returns a protection error", async () => {
     const result = await roClient.callTool({
       name: "networks_create",
       arguments: { siteId: "default", body: { name: "test" } },
@@ -197,10 +202,11 @@ describe("MCP server (read-only mode)", () => {
     expect(result.isError).toBe(true);
     const text = (result.content as { type: string; text: string }[])[0].text;
     const parsed = JSON.parse(text);
-    expect(parsed.error).toContain("Read-only mode");
+    expect(parsed.error).toContain("read");
+    expect(parsed.error).toContain("dangerous");
   });
 
-  test("calling a DELETE tool returns an error", async () => {
+  test("calling a DELETE tool returns a protection error", async () => {
     const result = await roClient.callTool({
       name: "networks_delete",
       arguments: { siteId: "default", networkId: "abc" },
@@ -208,7 +214,8 @@ describe("MCP server (read-only mode)", () => {
     expect(result.isError).toBe(true);
     const text = (result.content as { type: string; text: string }[])[0].text;
     const parsed = JSON.parse(text);
-    expect(parsed.error).toContain("Read-only mode");
+    expect(parsed.error).toContain("read");
+    expect(parsed.error).toContain("critical");
   });
 });
 
@@ -224,6 +231,7 @@ describe("MCP tools/call", () => {
   beforeAll(async () => {
     Bun.env.UNIFI_URL = "https://unifi.local";
     Bun.env.UNIFI_API_KEY = "test-api-key-123";
+    Bun.env.UNIFI_PROTECTION = "unrestricted";
 
     const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
     tcServer = await startMcpServer(sTransport);
@@ -235,6 +243,7 @@ describe("MCP tools/call", () => {
     globalThis.fetch = originalFetch;
     delete Bun.env.UNIFI_URL;
     delete Bun.env.UNIFI_API_KEY;
+    delete Bun.env.UNIFI_PROTECTION;
     await tcClient.close();
     await tcServer.close();
   });
@@ -866,5 +875,354 @@ describe("MCP tool inputSchema details", () => {
 
     const props = infoTool!.inputSchema.properties as Record<string, unknown>;
     expect(props.siteId).toBeUndefined();
+  });
+
+  test("critical tool has confirmationToken in inputSchema", async () => {
+    const { tools } = await client.listTools();
+    const deleteTool = tools.find((t) => t.name === "networks_delete");
+    expect(deleteTool).toBeDefined();
+
+    const props = deleteTool!.inputSchema.properties as Record<string, Record<string, unknown>>;
+    expect(props.confirmationToken).toBeDefined();
+    expect(props.confirmationToken.type).toBe("string");
+
+    // confirmationToken should NOT be required
+    const required = deleteTool!.inputSchema.required as string[] | undefined;
+    expect(required ?? []).not.toContain("confirmationToken");
+  });
+
+  test("non-critical tool does NOT have confirmationToken in inputSchema", async () => {
+    const { tools } = await client.listTools();
+    const createTool = tools.find((t) => t.name === "networks_create");
+    expect(createTool).toBeDefined();
+
+    const props = createTool!.inputSchema.properties as Record<string, unknown>;
+    expect(props.confirmationToken).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Protection level tests
+// ---------------------------------------------------------------------------
+
+describe("MCP server (protection=safe)", () => {
+  let safeClient: Client;
+  let safeServer: Server;
+
+  beforeAll(async () => {
+    Bun.env.UNIFI_PROTECTION = "safe";
+
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    safeServer = await startMcpServer(sTransport);
+    safeClient = new Client({ name: "test-client-safe", version: "0.0.1" }, {});
+    await safeClient.connect(cTransport);
+  });
+
+  afterAll(async () => {
+    delete Bun.env.UNIFI_PROTECTION;
+    await safeClient.close();
+    await safeServer.close();
+  });
+
+  test("tools/list returns read + moderate commands only", async () => {
+    const { tools } = await safeClient.listTools();
+    const expected = COMMANDS.filter((c) => cmdAllowedAtLevel(c, "safe"));
+    expect(tools.length).toBe(expected.length);
+
+    const toolNames = new Set(tools.map((t) => t.name));
+    // Dangerous/critical tools should be hidden
+    for (const cmd of COMMANDS.filter((c) => c.risk === "dangerous" || c.risk === "critical")) {
+      expect(toolNames.has(toolName(cmd))).toBe(false);
+    }
+    // Moderate tools should be visible
+    for (const cmd of COMMANDS.filter((c) => c.risk === "moderate")) {
+      expect(toolNames.has(toolName(cmd))).toBe(true);
+    }
+  });
+
+  test("calling a dangerous tool returns protection error", async () => {
+    const result = await safeClient.callTool({
+      name: "networks_create",
+      arguments: { siteId: "default", body: { name: "test" } },
+    });
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse((result.content as { type: string; text: string }[])[0].text);
+    expect(parsed.error).toContain("safe");
+    expect(parsed.error).toContain("dangerous");
+  });
+});
+
+describe("MCP server (protection=full)", () => {
+  let fullClient: Client;
+  let fullServer: Server;
+
+  beforeAll(async () => {
+    Bun.env.UNIFI_PROTECTION = "full";
+
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    fullServer = await startMcpServer(sTransport);
+    fullClient = new Client({ name: "test-client-full", version: "0.0.1" }, {});
+    await fullClient.connect(cTransport);
+  });
+
+  afterAll(async () => {
+    delete Bun.env.UNIFI_PROTECTION;
+    await fullClient.close();
+    await fullServer.close();
+  });
+
+  test("tools/list returns read + moderate + dangerous commands, but not critical", async () => {
+    const { tools } = await fullClient.listTools();
+    const expected = COMMANDS.filter((c) => cmdAllowedAtLevel(c, "full"));
+    expect(tools.length).toBe(expected.length);
+
+    const toolNames = new Set(tools.map((t) => t.name));
+    // Critical tools should be hidden
+    for (const cmd of COMMANDS.filter((c) => c.risk === "critical")) {
+      expect(toolNames.has(toolName(cmd))).toBe(false);
+    }
+    // Dangerous tools should be visible
+    for (const cmd of COMMANDS.filter((c) => c.risk === "dangerous")) {
+      expect(toolNames.has(toolName(cmd))).toBe(true);
+    }
+  });
+
+  test("calling a critical tool returns protection error", async () => {
+    const result = await fullClient.callTool({
+      name: "networks_delete",
+      arguments: { siteId: "default", networkId: "abc" },
+    });
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse((result.content as { type: string; text: string }[])[0].text);
+    expect(parsed.error).toContain("full");
+    expect(parsed.error).toContain("critical");
+  });
+});
+
+describe("MCP server (protection=unrestricted)", () => {
+  let urClient: Client;
+  let urServer: Server;
+
+  beforeAll(async () => {
+    Bun.env.UNIFI_PROTECTION = "unrestricted";
+
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    urServer = await startMcpServer(sTransport);
+    urClient = new Client({ name: "test-client-ur", version: "0.0.1" }, {});
+    await urClient.connect(cTransport);
+  });
+
+  afterAll(async () => {
+    delete Bun.env.UNIFI_PROTECTION;
+    await urClient.close();
+    await urServer.close();
+  });
+
+  test("tools/list returns all commands including critical", async () => {
+    const { tools } = await urClient.listTools();
+    expect(tools.length).toBe(COMMANDS.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two-step confirmation flow tests
+// ---------------------------------------------------------------------------
+
+describe("MCP confirmation flow (critical operations)", () => {
+  let cfClient: Client;
+  let cfServer: Server;
+  const originalFetch = globalThis.fetch;
+
+  beforeAll(async () => {
+    Bun.env.UNIFI_URL = "https://unifi.local";
+    Bun.env.UNIFI_API_KEY = "test-api-key-cf";
+    Bun.env.UNIFI_PROTECTION = "unrestricted";
+
+    const [cTransport, sTransport] = InMemoryTransport.createLinkedPair();
+    cfServer = await startMcpServer(sTransport);
+    cfClient = new Client({ name: "test-client-cf", version: "0.0.1" }, {});
+    await cfClient.connect(cTransport);
+  });
+
+  afterAll(async () => {
+    globalThis.fetch = originalFetch;
+    delete Bun.env.UNIFI_URL;
+    delete Bun.env.UNIFI_API_KEY;
+    delete Bun.env.UNIFI_PROTECTION;
+    await cfClient.close();
+    await cfServer.close();
+  });
+
+  test("critical tool without token returns confirmation prompt", async () => {
+    const result = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: { siteId: "88f7af54-0000-0000-0000-000000000000", networkId: "net-1" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse((result.content as { type: string; text: string }[])[0].text);
+    expect(parsed.confirmation_required).toBe(true);
+    expect(parsed.token).toBeDefined();
+    expect(typeof parsed.token).toBe("string");
+    expect(parsed.expires_in_seconds).toBe(30);
+    expect(parsed.impact).toContain("Delete a network");
+  });
+
+  test("critical tool with valid token executes the operation", async () => {
+    // Step 1: get confirmation token
+    const step1 = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: { siteId: "88f7af54-0000-0000-0000-000000000000", networkId: "net-2" },
+    });
+    const step1Parsed = JSON.parse((step1.content as { type: string; text: string }[])[0].text);
+    const token = step1Parsed.token;
+
+    // Step 2: mock the actual API call and confirm
+    const mockFetch = mock(() => {
+      return Promise.resolve(new Response(
+        JSON.stringify({ success: true }),
+        { status: 200 },
+      ));
+    });
+    globalThis.fetch = mockFetch;
+
+    const step2 = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: {
+        siteId: "88f7af54-0000-0000-0000-000000000000",
+        networkId: "net-2",
+        confirmationToken: token,
+      },
+    });
+
+    expect(step2.isError).toBeFalsy();
+    expect(mockFetch).toHaveBeenCalled();
+
+    globalThis.fetch = originalFetch;
+  });
+
+  test("invalid token returns error", async () => {
+    const result = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: {
+        siteId: "88f7af54-0000-0000-0000-000000000000",
+        networkId: "net-3",
+        confirmationToken: "invalid-token-12345",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse((result.content as { type: string; text: string }[])[0].text);
+    expect(parsed.error).toContain("Invalid or expired");
+  });
+
+  test("token for wrong tool returns error", async () => {
+    // Get a token for networks_delete
+    const step1 = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: { siteId: "88f7af54-0000-0000-0000-000000000000", networkId: "net-4" },
+    });
+    const token = JSON.parse((step1.content as { type: string; text: string }[])[0].text).token;
+
+    // Try to use it with a different critical tool
+    const result = await cfClient.callTool({
+      name: "devices_remove",
+      arguments: {
+        siteId: "88f7af54-0000-0000-0000-000000000000",
+        deviceId: "dev-1",
+        confirmationToken: token,
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse((result.content as { type: string; text: string }[])[0].text);
+    expect(parsed.error).toContain("networks_delete");
+    expect(parsed.error).toContain("devices_remove");
+  });
+
+  test("token cannot be reused", async () => {
+    // Step 1: get token
+    const step1 = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: { siteId: "88f7af54-0000-0000-0000-000000000000", networkId: "net-5" },
+    });
+    const token = JSON.parse((step1.content as { type: string; text: string }[])[0].text).token;
+
+    // Step 2: use the token (succeeds)
+    const mockFetch = mock(() => {
+      return Promise.resolve(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    });
+    globalThis.fetch = mockFetch;
+
+    await cfClient.callTool({
+      name: "networks_delete",
+      arguments: {
+        siteId: "88f7af54-0000-0000-0000-000000000000",
+        networkId: "net-5",
+        confirmationToken: token,
+      },
+    });
+
+    globalThis.fetch = originalFetch;
+
+    // Step 3: try to reuse the same token
+    const reuse = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: {
+        siteId: "88f7af54-0000-0000-0000-000000000000",
+        networkId: "net-5",
+        confirmationToken: token,
+      },
+    });
+
+    expect(reuse.isError).toBe(true);
+    const parsed = JSON.parse((reuse.content as { type: string; text: string }[])[0].text);
+    expect(parsed.error).toContain("Invalid or expired");
+  });
+
+  test("token for different arguments returns error", async () => {
+    // Get a token for networkId "net-A"
+    const step1 = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: { siteId: "88f7af54-0000-0000-0000-000000000000", networkId: "net-A" },
+    });
+    const token = JSON.parse((step1.content as { type: string; text: string }[])[0].text).token;
+
+    // Try to use it with networkId "net-B"
+    const result = await cfClient.callTool({
+      name: "networks_delete",
+      arguments: {
+        siteId: "88f7af54-0000-0000-0000-000000000000",
+        networkId: "net-B",
+        confirmationToken: token,
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse((result.content as { type: string; text: string }[])[0].text);
+    expect(parsed.error).toContain("different arguments");
+  });
+
+  test("non-critical tool does NOT require confirmation", async () => {
+    const mockFetch = mock(() => {
+      return Promise.resolve(new Response(
+        JSON.stringify({ id: "new-net" }),
+        { status: 200 },
+      ));
+    });
+    globalThis.fetch = mockFetch;
+
+    // networks_create is "dangerous" not "critical" — no confirmation needed
+    const result = await cfClient.callTool({
+      name: "networks_create",
+      arguments: { siteId: "88f7af54-0000-0000-0000-000000000000", body: { name: "test" } },
+    });
+
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse((result.content as { type: string; text: string }[])[0].text);
+    expect(parsed.confirmation_required).toBeUndefined();
+    expect(parsed.id).toBe("new-net");
+
+    globalThis.fetch = originalFetch;
   });
 });

@@ -2,6 +2,8 @@
 // Command registry — auto-derived from the OpenAPI spec
 // ---------------------------------------------------------------------------
 
+export type RiskLevel = "read" | "moderate" | "dangerous" | "critical";
+
 export interface CmdDef {
   /** Command group (null = top-level command) */
   group: string | null;
@@ -25,6 +27,8 @@ export interface CmdDef {
   hasBody: boolean;
   /** Extra query params beyond standard pagination */
   extraQuery: { name: string; required: boolean; desc: string }[];
+  /** Risk classification for protection level filtering */
+  risk: RiskLevel;
 }
 
 export const COMMANDS: CmdDef[] = [
@@ -34,6 +38,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/info",
     summary: "Show UniFi Network application info",
     args: [], needsSite: false, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
 
   // ── Sites ───────────────────────────────────────────────────────────
@@ -42,6 +47,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites",
     summary: "List all local sites (site IDs are needed for most commands)",
     args: [], needsSite: false, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
 
   // ── Devices ─────────────────────────────────────────────────────────
@@ -50,6 +56,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/devices",
     summary: "List adopted devices on a site",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "devices", action: "get", operationId: "getAdoptedDeviceDetails",
@@ -57,12 +64,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get detailed info for an adopted device",
     args: [{ name: "deviceId", desc: "Device ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "devices", action: "adopt", operationId: "adoptDevice",
     method: "POST", path: "/v1/sites/{siteId}/devices",
     summary: "Adopt a device to a site",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "devices", action: "remove", operationId: "removeDevice",
@@ -70,6 +79,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Remove (unadopt) a device — resets to factory defaults if online",
     args: [{ name: "deviceId", desc: "Device ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "critical",
   },
   {
     group: "devices", action: "stats", operationId: "getAdoptedDeviceLatestStatistics",
@@ -77,6 +87,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get latest real-time statistics (CPU, memory, uptime, throughput)",
     args: [{ name: "deviceId", desc: "Device ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "devices", action: "action", operationId: "executeAdoptedDeviceAction",
@@ -84,6 +95,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Execute an action on a device (e.g. restart)",
     args: [{ name: "deviceId", desc: "Device ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "devices", action: "port-action", operationId: "executePortAction",
@@ -94,12 +106,14 @@ export const COMMANDS: CmdDef[] = [
       { name: "portIdx", desc: "Port index" },
     ],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "devices", action: "pending", operationId: "getPendingDevicePage",
     method: "GET", path: "/v1/pending-devices",
     summary: "List devices pending adoption",
     args: [], needsSite: false, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
 
   // ── Clients ─────────────────────────────────────────────────────────
@@ -108,6 +122,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/clients",
     summary: "List connected clients (devices, phones, VPN users, etc.)",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "clients", action: "get", operationId: "getConnectedClientDetails",
@@ -115,6 +130,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get detailed info about a connected client",
     args: [{ name: "clientId", desc: "Client ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "clients", action: "action", operationId: "executeConnectedClientAction",
@@ -122,6 +138,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Execute an action on a connected client",
     args: [{ name: "clientId", desc: "Client ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
 
   // ── Networks ────────────────────────────────────────────────────────
@@ -130,6 +147,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/networks",
     summary: "List all networks on a site",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "networks", action: "get", operationId: "getNetworkDetails",
@@ -137,12 +155,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get detailed info about a network",
     args: [{ name: "networkId", desc: "Network ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "networks", action: "create", operationId: "createNetwork",
     method: "POST", path: "/v1/sites/{siteId}/networks",
     summary: "Create a new network",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "networks", action: "update", operationId: "updateNetwork",
@@ -150,6 +170,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Update an existing network",
     args: [{ name: "networkId", desc: "Network ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "networks", action: "delete", operationId: "deleteNetwork",
@@ -158,6 +179,7 @@ export const COMMANDS: CmdDef[] = [
     args: [{ name: "networkId", desc: "Network ID" }],
     needsSite: true, paginatable: false, hasBody: false,
     extraQuery: [{ name: "force", required: false, desc: "Force deletion" }],
+    risk: "critical",
   },
   {
     group: "networks", action: "references", operationId: "getNetworkReferences",
@@ -165,6 +187,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get resources that reference this network",
     args: [{ name: "networkId", desc: "Network ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
 
   // ── Firewall Zones ──────────────────────────────────────────────────
@@ -173,6 +196,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/firewall/zones",
     summary: "List all firewall zones",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "firewall-zones", action: "get", operationId: "getFirewallZone",
@@ -180,12 +204,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get a firewall zone",
     args: [{ name: "firewallZoneId", desc: "Firewall zone ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "firewall-zones", action: "create", operationId: "createFirewallZone",
     method: "POST", path: "/v1/sites/{siteId}/firewall/zones",
     summary: "Create a custom firewall zone",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "firewall-zones", action: "update", operationId: "updateFirewallZone",
@@ -193,6 +219,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Update a firewall zone",
     args: [{ name: "firewallZoneId", desc: "Firewall zone ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "firewall-zones", action: "delete", operationId: "deleteFirewallZone",
@@ -200,6 +227,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Delete a custom firewall zone",
     args: [{ name: "firewallZoneId", desc: "Firewall zone ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "critical",
   },
 
   // ── Firewall Policies ───────────────────────────────────────────────
@@ -208,6 +236,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/firewall/policies",
     summary: "List all firewall policies",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "firewall-policies", action: "get", operationId: "getFirewallPolicy",
@@ -215,12 +244,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get a firewall policy",
     args: [{ name: "firewallPolicyId", desc: "Firewall policy ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "firewall-policies", action: "create", operationId: "createFirewallPolicy",
     method: "POST", path: "/v1/sites/{siteId}/firewall/policies",
     summary: "Create a new firewall policy",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "firewall-policies", action: "update", operationId: "updateFirewallPolicy",
@@ -228,6 +259,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Update an existing firewall policy",
     args: [{ name: "firewallPolicyId", desc: "Firewall policy ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "firewall-policies", action: "patch", operationId: "patchFirewallPolicy",
@@ -235,6 +267,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Patch a firewall policy (partial update, e.g. toggle logging)",
     args: [{ name: "firewallPolicyId", desc: "Firewall policy ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "firewall-policies", action: "delete", operationId: "deleteFirewallPolicy",
@@ -242,6 +275,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Delete a firewall policy",
     args: [{ name: "firewallPolicyId", desc: "Firewall policy ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "critical",
   },
   {
     group: "firewall-policies", action: "ordering", operationId: "getFirewallPolicyOrdering",
@@ -252,6 +286,7 @@ export const COMMANDS: CmdDef[] = [
       { name: "sourceFirewallZoneId", required: true, desc: "Source zone ID" },
       { name: "destinationFirewallZoneId", required: true, desc: "Destination zone ID" },
     ],
+    risk: "read",
   },
   {
     group: "firewall-policies", action: "reorder", operationId: "updateFirewallPolicyOrdering",
@@ -262,6 +297,7 @@ export const COMMANDS: CmdDef[] = [
       { name: "sourceFirewallZoneId", required: true, desc: "Source zone ID" },
       { name: "destinationFirewallZoneId", required: true, desc: "Destination zone ID" },
     ],
+    risk: "dangerous",
   },
 
   // ── DNS Policies ────────────────────────────────────────────────────
@@ -270,6 +306,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/dns/policies",
     summary: "List DNS policies",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "dns", action: "get", operationId: "getDnsPolicy",
@@ -277,12 +314,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get a DNS policy",
     args: [{ name: "dnsPolicyId", desc: "DNS policy ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "dns", action: "create", operationId: "createDnsPolicy",
     method: "POST", path: "/v1/sites/{siteId}/dns/policies",
     summary: "Create a new DNS policy",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "moderate",
   },
   {
     group: "dns", action: "update", operationId: "updateDnsPolicy",
@@ -290,6 +329,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Update a DNS policy",
     args: [{ name: "dnsPolicyId", desc: "DNS policy ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "dns", action: "delete", operationId: "deleteDnsPolicy",
@@ -297,6 +337,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Delete a DNS policy",
     args: [{ name: "dnsPolicyId", desc: "DNS policy ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "dangerous",
   },
 
   // ── WiFi Broadcasts ─────────────────────────────────────────────────
@@ -305,6 +346,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/wifi/broadcasts",
     summary: "List WiFi broadcasts (SSIDs)",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "wifi", action: "get", operationId: "getWifiBroadcastDetails",
@@ -312,12 +354,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get WiFi broadcast details",
     args: [{ name: "wifiBroadcastId", desc: "WiFi broadcast ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "wifi", action: "create", operationId: "createWifiBroadcast",
     method: "POST", path: "/v1/sites/{siteId}/wifi/broadcasts",
     summary: "Create a new WiFi broadcast",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "wifi", action: "update", operationId: "updateWifiBroadcast",
@@ -325,6 +369,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Update a WiFi broadcast",
     args: [{ name: "wifiBroadcastId", desc: "WiFi broadcast ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "wifi", action: "delete", operationId: "deleteWifiBroadcast",
@@ -333,6 +378,7 @@ export const COMMANDS: CmdDef[] = [
     args: [{ name: "wifiBroadcastId", desc: "WiFi broadcast ID" }],
     needsSite: true, paginatable: false, hasBody: false,
     extraQuery: [{ name: "force", required: false, desc: "Force deletion" }],
+    risk: "critical",
   },
 
   // ── Hotspot Vouchers ────────────────────────────────────────────────
@@ -341,6 +387,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/hotspot/vouchers",
     summary: "List hotspot vouchers",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "hotspot", action: "get", operationId: "getVoucher",
@@ -348,12 +395,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get voucher details",
     args: [{ name: "voucherId", desc: "Voucher ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "hotspot", action: "create", operationId: "createVouchers",
     method: "POST", path: "/v1/sites/{siteId}/hotspot/vouchers",
     summary: "Generate one or more hotspot vouchers",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "moderate",
   },
   {
     group: "hotspot", action: "delete", operationId: "deleteVoucher",
@@ -361,6 +410,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Delete a specific voucher",
     args: [{ name: "voucherId", desc: "Voucher ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "hotspot", action: "delete-all", operationId: "deleteVouchers",
@@ -368,6 +418,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Delete vouchers matching a filter",
     args: [], needsSite: true, paginatable: false, hasBody: false,
     extraQuery: [{ name: "filter", required: true, desc: "Filter expression" }],
+    risk: "critical",
   },
 
   // ── ACL Rules ───────────────────────────────────────────────────────
@@ -376,6 +427,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/acl-rules",
     summary: "List ACL rules",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "acl", action: "get", operationId: "getAclRule",
@@ -383,12 +435,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get an ACL rule",
     args: [{ name: "aclRuleId", desc: "ACL rule ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "acl", action: "create", operationId: "createAclRule",
     method: "POST", path: "/v1/sites/{siteId}/acl-rules",
     summary: "Create a new ACL rule",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "moderate",
   },
   {
     group: "acl", action: "update", operationId: "updateAclRule",
@@ -396,6 +450,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Update an ACL rule",
     args: [{ name: "aclRuleId", desc: "ACL rule ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "acl", action: "delete", operationId: "deleteAclRule",
@@ -403,18 +458,21 @@ export const COMMANDS: CmdDef[] = [
     summary: "Delete an ACL rule",
     args: [{ name: "aclRuleId", desc: "ACL rule ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "acl", action: "ordering", operationId: "getAclRuleOrdering",
     method: "GET", path: "/v1/sites/{siteId}/acl-rules/ordering",
     summary: "Get ACL rule ordering",
     args: [], needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "acl", action: "reorder", operationId: "updateAclRuleOrdering",
     method: "PUT", path: "/v1/sites/{siteId}/acl-rules/ordering",
     summary: "Reorder ACL rules",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
 
   // ── Traffic Matching Lists ──────────────────────────────────────────
@@ -423,6 +481,7 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/traffic-matching-lists",
     summary: "List traffic matching lists",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "traffic-lists", action: "get", operationId: "getTrafficMatchingList",
@@ -430,12 +489,14 @@ export const COMMANDS: CmdDef[] = [
     summary: "Get a traffic matching list",
     args: [{ name: "trafficMatchingListId", desc: "Traffic matching list ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "traffic-lists", action: "create", operationId: "createTrafficMatchingList",
     method: "POST", path: "/v1/sites/{siteId}/traffic-matching-lists",
     summary: "Create a traffic matching list",
     args: [], needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "moderate",
   },
   {
     group: "traffic-lists", action: "update", operationId: "updateTrafficMatchingList",
@@ -443,6 +504,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Update a traffic matching list",
     args: [{ name: "trafficMatchingListId", desc: "Traffic matching list ID" }],
     needsSite: true, paginatable: false, hasBody: true, extraQuery: [],
+    risk: "dangerous",
   },
   {
     group: "traffic-lists", action: "delete", operationId: "deleteTrafficMatchingList",
@@ -450,6 +512,7 @@ export const COMMANDS: CmdDef[] = [
     summary: "Delete a traffic matching list",
     args: [{ name: "trafficMatchingListId", desc: "Traffic matching list ID" }],
     needsSite: true, paginatable: false, hasBody: false, extraQuery: [],
+    risk: "dangerous",
   },
 
   // ── Supporting Resources ────────────────────────────────────────────
@@ -458,48 +521,56 @@ export const COMMANDS: CmdDef[] = [
     method: "GET", path: "/v1/sites/{siteId}/wans",
     summary: "List WAN interfaces",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "vpn-tunnels", action: "list", operationId: "getSiteToSiteVpnTunnelPage",
     method: "GET", path: "/v1/sites/{siteId}/vpn/site-to-site-tunnels",
     summary: "List site-to-site VPN tunnels",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "vpn-servers", action: "list", operationId: "getVpnServerPage",
     method: "GET", path: "/v1/sites/{siteId}/vpn/servers",
     summary: "List VPN servers",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "radius-profiles", action: "list", operationId: "getRadiusProfileOverviewPage",
     method: "GET", path: "/v1/sites/{siteId}/radius/profiles",
     summary: "List RADIUS authentication profiles",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "device-tags", action: "list", operationId: "getDeviceTagPage",
     method: "GET", path: "/v1/sites/{siteId}/device-tags",
     summary: "List device tags (used for WiFi broadcast assignments)",
     args: [], needsSite: true, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "dpi", action: "categories", operationId: "getDpiApplicationCategories",
     method: "GET", path: "/v1/dpi/categories",
     summary: "List DPI application categories",
     args: [], needsSite: false, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: "dpi", action: "apps", operationId: "getDpiApplications",
     method: "GET", path: "/v1/dpi/applications",
     summary: "List DPI-recognized applications",
     args: [], needsSite: false, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
   {
     group: null, action: "countries", operationId: "getCountries",
     method: "GET", path: "/v1/countries",
     summary: "List ISO country codes (for region-based config)",
     args: [], needsSite: false, paginatable: true, hasBody: false, extraQuery: [],
+    risk: "read",
   },
 ];
 
@@ -548,6 +619,33 @@ export const RELATED_GROUPS: Record<string, string[]> = {
 };
 
 // ---------------------------------------------------------------------------
+// Protection levels
+// ---------------------------------------------------------------------------
+
+export type ProtectionLevel = "read" | "safe" | "full" | "unrestricted";
+
+/** Numeric ordering of risk levels (higher = more dangerous) */
+export const RISK_ORDER: Record<RiskLevel, number> = {
+  read: 0,
+  moderate: 1,
+  dangerous: 2,
+  critical: 3,
+};
+
+/** Maximum risk level allowed at each protection level */
+export const PROTECTION_ALLOWS: Record<ProtectionLevel, number> = {
+  read: 0,       // only read
+  safe: 1,       // read + moderate
+  full: 2,       // read + moderate + dangerous
+  unrestricted: 3, // everything
+};
+
+/** Check if a command is allowed at a given protection level */
+export function cmdAllowedAtLevel(cmd: CmdDef, level: ProtectionLevel): boolean {
+  return RISK_ORDER[cmd.risk] <= PROTECTION_ALLOWS[level];
+}
+
+// ---------------------------------------------------------------------------
 // Tool annotations — MCP readOnlyHint / destructiveHint / etc.
 // ---------------------------------------------------------------------------
 
@@ -564,7 +662,7 @@ export function buildToolAnnotations(cmd: CmdDef): ToolAnnotations {
   return {
     title: cmd.summary,
     readOnlyHint: m === "GET" || m === "HEAD" || m === "OPTIONS",
-    destructiveHint: m === "DELETE",
+    destructiveHint: cmd.risk === "critical" || cmd.risk === "dangerous",
     idempotentHint: m === "GET" || m === "PUT" || m === "DELETE",
     openWorldHint: false, // closed UniFi API
   };

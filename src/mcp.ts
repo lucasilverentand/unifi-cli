@@ -9,7 +9,7 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { COMMANDS, toolName, buildToolAnnotations, buildToolDescription, type CmdDef } from "./commands.ts";
+import { COMMANDS, toolName, buildToolAnnotations, buildToolDescription, cmdAllowedAtLevel, type CmdDef, type ProtectionLevel } from "./commands.ts";
 import { resolveConfig } from "./config.ts";
 import { UnifiClient } from "./client.ts";
 import { executeCommand, executeAllPages } from "./execute.ts";
@@ -93,11 +93,46 @@ function buildInputSchema(cmd: CmdDef): Record<string, unknown> {
     required.push("body");
   }
 
+  // Confirmation token for critical operations
+  if (cmd.risk === "critical") {
+    properties.confirmationToken = {
+      type: "string",
+      description: "Confirmation token returned by a previous call. Critical operations require two-step confirmation: first call without token to get a confirmation prompt, then call again with the token to execute.",
+    };
+  }
+
   return {
     type: "object",
     properties,
     required: required.length ? required : undefined,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Two-step confirmation for critical operations
+// ---------------------------------------------------------------------------
+
+interface PendingConfirmation {
+  token: string;
+  toolName: string;
+  argsKey: string;
+  expiresAt: number;
+}
+
+const CONFIRMATION_TTL_MS = 30_000;
+const pendingConfirmations = new Map<string, PendingConfirmation>();
+
+function cleanupExpiredConfirmations(): void {
+  const now = Date.now();
+  for (const [key, pc] of pendingConfirmations) {
+    if (pc.expiresAt <= now) pendingConfirmations.delete(key);
+  }
+}
+
+function argsKey(params: Record<string, unknown> | undefined): string {
+  if (!params) return "";
+  const { confirmationToken: _, ...rest } = params;
+  return JSON.stringify(rest, Object.keys(rest).sort());
 }
 
 // ---------------------------------------------------------------------------
@@ -122,13 +157,11 @@ function findCmd(operationId: string): CmdDef | undefined {
 // MCP Server
 // ---------------------------------------------------------------------------
 
-const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-
 export async function startMcpServer(customTransport?: import("@modelcontextprotocol/sdk/server/index.js").Transport): Promise<Server> {
   const config = resolveConfig({});
   // UniFi controllers use self-signed certificates by default — always allow them
   Bun.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  const readOnly = config.readOnly;
+  const protection: ProtectionLevel = config.protection;
 
   const server = new Server(
     { name: "unifi-cli", version: pkg.version },
@@ -146,7 +179,14 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
         "",
         "Firewall model: zones group networks; policies define rules between zone pairs. To audit firewall config, read zones first, then policies, then check ordering per zone pair.",
         "",
-        "Safety: destructive tools (DELETE) are annotated with destructiveHint=true. In read-only mode (UNIFI_READ_ONLY=1), only GET tools are available.",
+        `Protection level: "${protection}". Tools are filtered by risk level:`,
+        "  - read: GET-only operations (no side effects)",
+        "  - safe: read + moderate risk (creates new resources, easily reversible)",
+        "  - full: safe + dangerous risk (modifies existing config, can disrupt service)",
+        "  - unrestricted: everything including critical operations (factory reset, bulk delete)",
+        "",
+        "Critical operations (e.g. device removal, network deletion) require two-step confirmation even at unrestricted level.",
+        "Call the tool once without confirmationToken to receive an impact summary and token, then call again with the token to execute.",
         "",
         "TLS: UniFi controllers use self-signed certificates. This server automatically trusts them.",
       ].join("\n"),
@@ -187,9 +227,7 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
 
   // ── ListTools ─────────────────────────────────────────────────────
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const cmds = readOnly
-      ? COMMANDS.filter((cmd) => READ_ONLY_METHODS.has(cmd.method))
-      : COMMANDS;
+    const cmds = COMMANDS.filter((cmd) => cmdAllowedAtLevel(cmd, protection));
     const tools = cmds.map((cmd) => ({
       name: toolName(cmd),
       description: buildToolDescription(cmd),
@@ -203,6 +241,7 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const cmd = toolMap.get(name);
+    const params = args as Record<string, unknown> | undefined;
 
     if (!cmd) {
       return {
@@ -211,17 +250,88 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
       };
     }
 
-    if (readOnly && !READ_ONLY_METHODS.has(cmd.method)) {
+    if (!cmdAllowedAtLevel(cmd, protection)) {
       return {
         content: [{
           type: "text",
           text: JSON.stringify({
-            error: `Read-only mode: ${cmd.method} ${cmd.path} is not allowed`,
-            hint: "Unset UNIFI_READ_ONLY to enable write operations",
+            error: `Protection level "${protection}" does not allow ${cmd.risk}-risk operations: ${cmd.method} ${cmd.path}`,
+            hint: `Current level: "${protection}". Set UNIFI_PROTECTION to a higher level (read < safe < full < unrestricted) to enable this tool.`,
           }),
         }],
         isError: true,
       };
+    }
+
+    // Two-step confirmation for critical operations
+    if (cmd.risk === "critical") {
+      cleanupExpiredConfirmations();
+      const token = params?.confirmationToken ? String(params.confirmationToken) : undefined;
+      const currentArgsKey = argsKey(params);
+
+      if (!token) {
+        // Step 1: generate confirmation token
+        const newToken = crypto.randomUUID();
+        pendingConfirmations.set(newToken, {
+          token: newToken,
+          toolName: name,
+          argsKey: currentArgsKey,
+          expiresAt: Date.now() + CONFIRMATION_TTL_MS,
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              confirmation_required: true,
+              token: newToken,
+              impact: `${cmd.summary}. This is a critical operation that may cause data loss or service disruption.`,
+              expires_in_seconds: CONFIRMATION_TTL_MS / 1000,
+              hint: `Call ${name} again with confirmationToken: "${newToken}" to confirm execution.`,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // Step 2: validate token
+      const pending = pendingConfirmations.get(token);
+      if (!pending) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              error: "Invalid or expired confirmation token",
+              hint: `Call ${name} without confirmationToken to get a new confirmation prompt.`,
+            }),
+          }],
+          isError: true,
+        };
+      }
+      if (pending.toolName !== name) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              error: `Confirmation token was issued for "${pending.toolName}", not "${name}"`,
+              hint: `Call ${name} without confirmationToken to get a new confirmation prompt.`,
+            }),
+          }],
+          isError: true,
+        };
+      }
+      if (pending.argsKey !== currentArgsKey) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              error: "Confirmation token was issued for different arguments",
+              hint: `Call ${name} without confirmationToken to get a new confirmation prompt.`,
+            }),
+          }],
+          isError: true,
+        };
+      }
+      // Token valid — consume it and proceed
+      pendingConfirmations.delete(token);
     }
 
     let client: UnifiClient;
@@ -241,8 +351,6 @@ export async function startMcpServer(customTransport?: import("@modelcontextprot
     }
 
     // Map tool arguments to ExecuteParams
-    const params = args as Record<string, unknown> | undefined;
-
     const pathArgs: Record<string, string> = {};
     for (const arg of cmd.args) {
       if (params?.[arg.name]) pathArgs[arg.name] = String(params[arg.name]);
