@@ -70,37 +70,57 @@ describe("MCP server", () => {
     expect(Object.keys(props.body.properties as object).length).toBeGreaterThan(0);
   });
 
-  test("resources/list returns 3 resources", async () => {
+  test("resources/list returns 5 resources", async () => {
     const { resources } = await client.listResources();
-    expect(resources.length).toBe(3);
+    expect(resources.length).toBe(5);
 
     const uris = resources.map((r) => r.uri);
     expect(uris).toContain("unifi://info");
     expect(uris).toContain("unifi://sites");
     expect(uris).toContain("unifi://spec");
+    expect(uris).toContain("unifi://pending-devices");
+    expect(uris).toContain("unifi://dpi/categories");
   });
 
-  test("resources/templates/list returns 6 templates", async () => {
+  test("resources/templates/list returns 13 templates", async () => {
     const { resourceTemplates } = await client.listResourceTemplates();
-    expect(resourceTemplates.length).toBe(6);
+    expect(resourceTemplates.length).toBe(13);
 
     const uriTemplates = resourceTemplates.map((t) => t.uriTemplate);
+    // Existing templates
     expect(uriTemplates).toContain("unifi://sites/{siteId}/devices");
     expect(uriTemplates).toContain("unifi://sites/{siteId}/networks");
     expect(uriTemplates).toContain("unifi://sites/{siteId}/clients");
     expect(uriTemplates).toContain("unifi://sites/{siteId}/firewall");
     expect(uriTemplates).toContain("unifi://sites/{siteId}/wifi");
     expect(uriTemplates).toContain("unifi://sites/{siteId}/vpn");
+    // New simple templates
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/dns");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/acl");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/hotspot");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/traffic-lists");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/wans");
+    // New composite templates
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/overview");
+    expect(uriTemplates).toContain("unifi://sites/{siteId}/security");
   });
 
-  test("prompts/list returns 6 prompts with siteId argument", async () => {
+  test("prompts/list returns 14 prompts", async () => {
     const { prompts } = await client.listPrompts();
-    expect(prompts.length).toBe(6);
+    expect(prompts.length).toBe(14);
 
-    for (const prompt of prompts) {
+    // All prompts except compare-sites have siteId as first argument
+    const withSiteId = prompts.filter((p) => p.name !== "compare-sites");
+    for (const prompt of withSiteId) {
       expect(prompt.arguments!.length).toBeGreaterThanOrEqual(1);
       expect(prompt.arguments![0].name).toBe("siteId");
     }
+
+    // compare-sites uses siteId1 and siteId2
+    const compareSites = prompts.find((p) => p.name === "compare-sites");
+    expect(compareSites).toBeDefined();
+    expect(compareSites!.arguments![0].name).toBe("siteId1");
+    expect(compareSites!.arguments![1].name).toBe("siteId2");
   });
 
   test("tools have annotations with readOnlyHint and destructiveHint", async () => {
@@ -793,6 +813,109 @@ describe("MCP prompts/get", () => {
     const content = result.messages[0].content as { type: string; text: string };
     expect(content.text).toContain("sec-site");
     expect(content.text).toContain("hardening");
+  });
+
+  test("plan-vlans returns messages with siteId", async () => {
+    const result = await client.getPrompt({
+      name: "plan-vlans",
+      arguments: { siteId: "vlan-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("vlan-site");
+    expect(content.text).toContain("VLAN");
+    expect(content.text).toContain("segmentation");
+  });
+
+  test("setup-guest-network returns messages with siteId and default ssidName", async () => {
+    const result = await client.getPrompt({
+      name: "setup-guest-network",
+      arguments: { siteId: "guest-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("guest-site");
+    expect(content.text).toContain('"Guest"');
+  });
+
+  test("setup-guest-network uses custom ssidName", async () => {
+    const result = await client.getPrompt({
+      name: "setup-guest-network",
+      arguments: { siteId: "guest-site", ssidName: "Visitors" },
+    });
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain('"Visitors"');
+  });
+
+  test("configure-vpn returns messages with siteId", async () => {
+    const result = await client.getPrompt({
+      name: "configure-vpn",
+      arguments: { siteId: "vpn-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("vpn-site");
+    expect(content.text).toContain("vpn_tunnels_list");
+    expect(content.text).toContain("vpn_servers_list");
+  });
+
+  test("manage-dns returns messages with siteId", async () => {
+    const result = await client.getPrompt({
+      name: "manage-dns",
+      arguments: { siteId: "dns-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("dns-site");
+    expect(content.text).toContain("dns_list");
+  });
+
+  test("onboard-devices returns messages with siteId", async () => {
+    const result = await client.getPrompt({
+      name: "onboard-devices",
+      arguments: { siteId: "onboard-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("onboard-site");
+    expect(content.text).toContain("devices_pending");
+    expect(content.text).toContain("devices_adopt");
+  });
+
+  test("capacity-planning returns messages with siteId", async () => {
+    const result = await client.getPrompt({
+      name: "capacity-planning",
+      arguments: { siteId: "cap-site" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("cap-site");
+    expect(content.text).toContain("clients per AP");
+    expect(content.text).toContain("port utilization");
+  });
+
+  test("incident-response returns messages with siteId and issue", async () => {
+    const result = await client.getPrompt({
+      name: "incident-response",
+      arguments: { siteId: "inc-site", issue: "WiFi keeps dropping" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("inc-site");
+    expect(content.text).toContain("WiFi keeps dropping");
+    expect(content.text).toContain("Root Cause");
+  });
+
+  test("compare-sites returns messages with both siteIds", async () => {
+    const result = await client.getPrompt({
+      name: "compare-sites",
+      arguments: { siteId1: "site-alpha", siteId2: "site-beta" },
+    });
+    expect(result.messages.length).toBe(1);
+    const content = result.messages[0].content as { type: string; text: string };
+    expect(content.text).toContain("site-alpha");
+    expect(content.text).toContain("site-beta");
+    expect(content.text).toContain("diff");
   });
 
   test("unknown prompt throws error", async () => {
