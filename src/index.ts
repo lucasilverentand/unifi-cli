@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { Command } from "commander";
-import { resolveConfig, requireConfig, saveConfig, type Config } from "./config.ts";
+import { resolveConfig, requireConfig, saveConfig } from "./config.ts";
 import { UnifiClient } from "./client.ts";
 import { formatOutput, pickFields } from "./output.ts";
 import {
@@ -417,6 +417,27 @@ async function resolveBody(data: string): Promise<unknown> {
     throw new Error(`Invalid JSON: ${data.length > 80 ? data.slice(0, 80) + "..." : data}`);
   }
 }
+
+// ── TUI (default action when no subcommand) ──────────────────────────
+
+program.action(async () => {
+  if (!process.stdin.isTTY) {
+    program.help();
+    return;
+  }
+  const globalOpts = program.opts();
+  const config = resolveConfig(globalOpts);
+  if (!config.url || !config.apiKey) {
+    console.error(
+      JSON.stringify({
+        error: "Missing UniFi configuration. Set UNIFI_URL and UNIFI_API_KEY, or run: unifi-cli configure",
+      }),
+    );
+    process.exit(1);
+  }
+  const { startTui } = await import("./tui/main.tsx");
+  await startTui(config as typeof config & { url: string; apiKey: string });
+});
 
 // ---------------------------------------------------------------------------
 // Main
